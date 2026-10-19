@@ -1,5 +1,5 @@
 import type { Brand } from "ts-brand"
-import type { Hash } from "viem"
+import type { Address, Hash } from "viem"
 
 /**
  * A 32-byte transaction hash, branded so callers cannot pass arbitrary hex by accident.
@@ -13,10 +13,14 @@ export function asTransactionHash(hash: Hash): TransactionHash {
   return hash as TransactionHash
 }
 
-export class NotImplementedError extends Error {
-  override readonly name = "NotImplementedError"
+/**
+ * An EVM contract address, branded for use in deployment maps.
+ */
+export type EvmContractAddress = Brand<Address, "EvmContractAddress">
 
-  constructor(message = "Not implemented") {
-    super(message)
-  }
+/**
+ * Narrow a Viem `Address` to a branded `EvmContractAddress`.
+ */
+export function asEvmContractAddress(address: Address): EvmContractAddress {
+  return address as EvmContractAddress
 }
