@@ -10,6 +10,7 @@ import {
   DelegationDecoder,
   InvalidTransactionError,
   UnsupportedChainError,
+  type InterpretedDelegation,
 } from "../src/index.js"
 import { createMockPublicClient } from "./helpers/mockPublicClient.js"
 
@@ -24,7 +25,7 @@ type Fixture = {
     hash: Hex
     from: Hex
   }
-  expectedDelegations: unknown
+  expectedDelegations: InterpretedDelegation[][]
 }
 
 function loadFixtures(): Fixture[] {
@@ -40,7 +41,7 @@ describe("DelegationDecoder.getDelegationsForTransaction", () => {
     expect(fixtures).toHaveLength(4)
   })
 
-  it.each(fixtures)("decodes fixture $chainId-$hash", async (fixture) => {
+  it.each(fixtures)("decodes and interprets fixture $chainId-$hash", async (fixture) => {
     const client = createMockPublicClient({
       chainId: fixture.chainId,
       transactions: new Map([
@@ -60,9 +61,87 @@ describe("DelegationDecoder.getDelegationsForTransaction", () => {
     const result = await decoder.getDelegationsForTransaction(asTransactionHash(fixture.hash))
 
     expect(result.isOk()).toBe(true)
-    if (result.isOk()) {
-      expect(result.value).toEqual(fixture.expectedDelegations)
+    if (!result.isOk()) {
+      return
     }
+
+    const chains = result.value
+    expect(chains.length).toBe(fixture.expectedDelegations.length)
+
+    for (let batchIndex = 0; batchIndex < chains.length; batchIndex++) {
+      const chain = chains[batchIndex]!
+      const expectedChain = fixture.expectedDelegations[batchIndex]!
+      expect(chain.length).toBe(expectedChain.length)
+
+      for (let i = 0; i < chain.length; i++) {
+        const del = chain[i]!
+        const expected = expectedChain[i]!
+        expect(del.delegate.toLowerCase()).toBe(expected.delegate.toLowerCase())
+        expect(del.delegator.toLowerCase()).toBe(expected.delegator.toLowerCase())
+        expect(del.authority).toBe(expected.authority)
+        expect(del.caveats.length).toBe(expected.caveats.length)
+
+        for (const caveat of del.caveats) {
+          if (caveat.type === "unknown") {
+            expect(caveat.decodedTerms).toBeNull()
+          } else {
+            expect(caveat.decodedTerms).not.toBeNull()
+          }
+        }
+      }
+    }
+  })
+
+  it("interprets ethereum fixture caveats as exactExecution, limitedCalls, timestamp", async () => {
+    const fixture = fixtures.find((f) => f.hash.startsWith("0xea2a"))!
+    const client = createMockPublicClient({
+      chainId: fixture.chainId,
+      transactions: new Map([
+        [fixture.hash, { to: fixture.transaction.to, input: fixture.transaction.input }],
+      ]),
+    })
+    const decoder = new DelegationDecoder({ publicClient: client })
+    const result = await decoder.getDelegationsForTransaction(asTransactionHash(fixture.hash))
+
+    expect(result.isOk()).toBe(true)
+    if (!result.isOk()) {
+      return
+    }
+
+    const caveats = result.value[0]![1]!.caveats
+    expect(caveats.map((c) => c.type)).toEqual(["exactExecution", "limitedCalls", "timestamp"])
+    expect(caveats[1]!.decodedTerms).toEqual({ limit: 1 })
+  })
+
+  it("interprets Arc fixture LiFiSwap caveat terms", async () => {
+    const fixture = fixtures.find((f) => f.hash.startsWith("0x6188"))!
+    const client = createMockPublicClient({
+      chainId: fixture.chainId,
+      transactions: new Map([
+        [fixture.hash, { to: fixture.transaction.to, input: fixture.transaction.input }],
+      ]),
+    })
+    const decoder = new DelegationDecoder({ publicClient: client })
+    const result = await decoder.getDelegationsForTransaction(asTransactionHash(fixture.hash))
+
+    expect(result.isOk()).toBe(true)
+    if (!result.isOk()) {
+      return
+    }
+
+    const lifi = result.value
+      .flat()
+      .flatMap((d) => d.caveats)
+      .find((c) => c.type === "lifiSwap")
+
+    expect(lifi).toBeDefined()
+    expect(lifi!.decodedTerms).toMatchObject({
+      destinationChainId: 1n,
+      slippageBps: 50n,
+    })
+    expect(lifi!.decodedArgs).toMatchObject({
+      routeKind: 1,
+    })
   })
 
   it("returns InvalidTransactionError when the transaction is missing", async () => {
@@ -118,7 +197,6 @@ describe("DelegationDecoder.getDelegationsForTransaction", () => {
           hash,
           {
             to: DELEGATION_MANAGER_V1_3_0,
-            // pause() selector on DelegationManager — not redeemDelegations
             input: "0x8456cb59",
           },
         ],

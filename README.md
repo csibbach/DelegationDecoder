@@ -1,8 +1,8 @@
 # DelegationDecoder
 
-Decode [MetaMask Delegation Framework](https://github.com/MetaMask/delegation-framework) delegations from on-chain transaction data.
+Decode [MetaMask Delegation Framework](https://github.com/MetaMask/delegation-framework) delegations from on-chain transaction data, including **interpreted caveat terms and args**.
 
-Built on [Viem](https://viem.sh) and [`@metamask/smart-accounts-kit`](https://docs.metamask.io/smart-accounts-kit).
+Built on [Viem](https://viem.sh), [`@metamask/smart-accounts-kit`](https://docs.metamask.io/smart-accounts-kit), and [`@metamask/delegation-core`](https://www.npmjs.com/package/@metamask/delegation-core).
 
 ## Install
 
@@ -27,31 +27,54 @@ const decoder = new DelegationDecoder({ publicClient })
 const result = await decoder.getDelegationsForTransaction(asTransactionHash("0x…"))
 
 result.match(
-  (delegationChains) => {
-    // Delegation[][] — one chain (leaf → root) per redeemDelegations batch entry
+  (chains) => {
+    // InterpretedDelegation[][] — one chain (leaf → root) per batch entry
+    for (const chain of chains) {
+      for (const delegation of chain) {
+        for (const caveat of delegation.caveats) {
+          // caveat.type e.g. 'exactExecution' | 'limitedCalls' | 'timestamp' | 'unknown'
+          // caveat.decodedTerms — structured fields
+          // caveat.terms / caveat.args — original hex preserved
+        }
+      }
+    }
   },
   (error) => {
-    // InvalidTransactionError | UnsupportedChainError | RPC errors
+    // InvalidTransactionError | UnsupportedChainError | CaveatTermsDecodeError | RPC errors
   },
 )
 ```
 
-`getDelegationsForTransaction` returns `ResultAsync<Delegation[][], Error>`:
+### What gets decoded
 
-1. Loads the transaction via the bound `PublicClient`
-2. Checks `to` is the v1.3.0 [DelegationManager](https://github.com/MetaMask/delegation-framework/blob/main/documents/Deployments.md) for `publicClient.chain.id`
-3. Decodes `redeemDelegations` calldata and each permission context
+Stock MetaMask v1.3.0 enforcers are resolved by CREATE2 address and decoded via `@metamask/delegation-core` (plus local packed decoders for MultiOperation\* enforcers).
 
-Custom caveat enforcers (for example a Chainlink price rule) appear as normal caveats: `{ enforcer, terms, args }` with `terms`/`args` left as raw hex. Interpreting packed terms by enforcer address is a separate concern.
+1Shot custom enforcers (`chainlinkPriceRule`, `lifiSwap`, `erc20BalanceChangeSafe`, `erc20BalanceLimit`) are supported once you register their deployment addresses:
+
+```ts
+import { getAddress } from "viem"
+import { DelegationDecoder } from "delegation-decoder"
+
+const decoder = new DelegationDecoder({
+  publicClient,
+  extraEnforcerAddresses: [
+    [getAddress("0xYourChainlinkEnforcer"), "chainlinkPriceRule"],
+    [getAddress("0xYourLiFiSwapEnforcer"), "lifiSwap"],
+  ],
+})
+```
+
+Unknown enforcer addresses yield `type: 'unknown'` with `decodedTerms: null` (the transaction still succeeds). Malformed terms for a **known** enforcer throw `CaveatTermsDecodeError`.
+
+You can also call `interpretCaveat` / `interpretDelegations` directly on already-decoded raw caveats.
 
 ### Errors
 
-| Error                     | When                                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `InvalidTransactionError` | Tx missing, not sent to the DelegationManager, not `redeemDelegations`, or malformed permission context (message distinguishes the case) |
-| `UnsupportedChainError`   | `chain.id` is not in the known DelegationManager deployment map                                                                          |
-
-Override addresses via `new DelegationDecoder({ publicClient, delegationManagerAddresses })` when using a fork or custom deploy.
+| Error                     | When                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `InvalidTransactionError` | Tx missing, not sent to the DelegationManager, not `redeemDelegations`, or malformed permission context |
+| `UnsupportedChainError`   | `chain.id` is not in the known DelegationManager deployment map                                         |
+| `CaveatTermsDecodeError`  | Known enforcer address but terms/args failed to decode                                                  |
 
 ## Scripts
 

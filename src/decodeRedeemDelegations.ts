@@ -1,8 +1,8 @@
 import { DelegationManager } from "@metamask/delegation-abis"
-import type { Delegation } from "@metamask/smart-accounts-kit"
-import { decodePermissionContexts } from "@metamask/smart-accounts-kit/utils"
+import { decodeDelegations } from "@metamask/smart-accounts-kit/utils"
 import { decodeFunctionData, type Hex } from "viem"
 
+import type { Delegation } from "./caveats/types.js"
 import { InvalidTransactionError } from "./errors.js"
 
 const REDEEM_DELEGATIONS = "redeemDelegations"
@@ -34,7 +34,7 @@ export function decodeRedeemDelegationsCalldata(data: Hex): Delegation[][] {
   const permissionContexts = decoded.args[0] as Hex[]
 
   try {
-    return decodePermissionContexts(permissionContexts)
+    return permissionContexts.map((context) => decodeDelegations(context) as Delegation[])
   } catch (cause) {
     throw new InvalidTransactionError(
       `Transaction has a malformed permission context${

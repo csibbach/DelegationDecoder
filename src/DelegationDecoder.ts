@@ -1,8 +1,13 @@
-import type { Delegation } from "@metamask/smart-accounts-kit"
 import { ResultAsync } from "neverthrow"
 import { getAddress, TransactionNotFoundError, type Address, type PublicClient } from "viem"
 
+import { interpretDelegations } from "./caveats/interpretDelegations.js"
+import type { EnforcerAddressMap, EnforcerType, InterpretedDelegation } from "./caveats/types.js"
 import { decodeRedeemDelegationsCalldata } from "./decodeRedeemDelegations.js"
+import {
+  DEFAULT_CAVEAT_ENFORCER_ADDRESSES,
+  mergeEnforcerAddresses,
+} from "./deployments/caveatEnforcerAddresses.js"
 import { DEFAULT_DELEGATION_MANAGER_ADDRESSES } from "./deployments/delegationManagerAddresses.js"
 import { InvalidTransactionError, UnsupportedChainError } from "./errors.js"
 import type { TransactionHash } from "./types.js"
@@ -13,6 +18,11 @@ export type DelegationDecoderParams = {
    * Override the default chainId → DelegationManager address map (e.g. forks / custom deploys).
    */
   delegationManagerAddresses?: ReadonlyMap<number, Address>
+  /**
+   * Extra / override caveat enforcer address → type mappings (e.g. 1Shot customs).
+   */
+  extraEnforcerAddresses?:
+    ReadonlyMap<Address, EnforcerType> | Iterable<readonly [Address, EnforcerType]>
 }
 
 /**
@@ -21,27 +31,38 @@ export type DelegationDecoderParams = {
 export class DelegationDecoder {
   readonly publicClient: PublicClient
   readonly delegationManagerAddresses: ReadonlyMap<number, Address>
+  readonly enforcerAddresses: EnforcerAddressMap
 
-  constructor({ publicClient, delegationManagerAddresses }: DelegationDecoderParams) {
+  constructor({
+    publicClient,
+    delegationManagerAddresses,
+    extraEnforcerAddresses,
+  }: DelegationDecoderParams) {
     this.publicClient = publicClient
     this.delegationManagerAddresses =
       delegationManagerAddresses ?? DEFAULT_DELEGATION_MANAGER_ADDRESSES
+    this.enforcerAddresses = mergeEnforcerAddresses(
+      extraEnforcerAddresses,
+      DEFAULT_CAVEAT_ENFORCER_ADDRESSES,
+    )
   }
 
   /**
-   * Fetch a transaction and decode the `Delegation[]` chains from each
-   * `redeemDelegations` permission context (batch entry).
+   * Fetch a transaction and decode each `redeemDelegations` permission context into
+   * interpreted delegation chains (caveat terms/args decoded where known).
    */
   getDelegationsForTransaction(
     transactionHash: TransactionHash,
-  ): ResultAsync<Delegation[][], Error> {
+  ): ResultAsync<InterpretedDelegation[][], Error> {
     return ResultAsync.fromPromise(
       this.#getDelegationsForTransaction(transactionHash),
       (error): Error => (error instanceof Error ? error : new Error(String(error))),
     )
   }
 
-  async #getDelegationsForTransaction(transactionHash: TransactionHash): Promise<Delegation[][]> {
+  async #getDelegationsForTransaction(
+    transactionHash: TransactionHash,
+  ): Promise<InterpretedDelegation[][]> {
     const chainId = this.publicClient.chain?.id
     if (chainId === undefined) {
       throw new UnsupportedChainError(
@@ -81,6 +102,7 @@ export class DelegationDecoder {
       )
     }
 
-    return decodeRedeemDelegationsCalldata(transaction.input)
+    const raw = decodeRedeemDelegationsCalldata(transaction.input)
+    return interpretDelegations(raw, { enforcerAddresses: this.enforcerAddresses })
   }
 }

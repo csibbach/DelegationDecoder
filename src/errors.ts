@@ -23,3 +23,17 @@ export class UnsupportedChainError extends Error {
     this.chainId = chainId
   }
 }
+
+/**
+ * A known caveat enforcer's terms or args could not be decoded.
+ */
+export class CaveatTermsDecodeError extends Error {
+  override readonly name = "CaveatTermsDecodeError"
+
+  readonly enforcerType: string
+
+  constructor(enforcerType: string, detail: string) {
+    super(`Failed to decode ${enforcerType} caveat: ${detail}`)
+    this.enforcerType = enforcerType
+  }
+}
