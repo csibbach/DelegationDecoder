@@ -17,18 +17,18 @@ npm install delegation-decoder viem
 ## Usage
 
 ```ts
-import { createPublicClient, http } from 'viem'
-import { mainnet } from 'viem/chains'
-import { asTransactionHash, createDelegationDecoder } from 'delegation-decoder'
+import { createPublicClient, http } from "viem"
+import { mainnet } from "viem/chains"
+import { asTransactionHash, DelegationDecoder } from "delegation-decoder"
 
 const publicClient = createPublicClient({
   chain: mainnet,
   transport: http(),
 })
 
-const decoder = createDelegationDecoder({ publicClient })
+const decoder = new DelegationDecoder({ publicClient })
 
-const result = await decoder.getDelegationsForTransaction(asTransactionHash('0x…'))
+const result = await decoder.getDelegationsForTransaction(asTransactionHash("0x…"))
 
 result.match(
   (delegations) => {

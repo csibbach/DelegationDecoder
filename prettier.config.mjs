@@ -2,10 +2,10 @@
 const config = {
   semi: false,
   singleQuote: false,
-  trailingComma: 'all',
+  trailingComma: "all",
   printWidth: 100,
   tabWidth: 2,
-  arrowParens: 'always',
+  arrowParens: "always",
 }
 
 export default config
